@@ -2,13 +2,28 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 # App configuration
 st.set_page_config(page_title="Nifty Options Calculator", layout="wide")
-st.title("Nifty 50 Weekly Options Calculator")
+st.title("Nifty 50 Options Selling Limits Calculator")
 st.markdown("""
-Calculate next week's projected options selling limits using latest volatility measures.
+Calculate projected upper/lower limits using ATR and Standard Deviation with different confidence levels.
 """)
+
+# Date selection in sidebar
+with st.sidebar:
+    st.header("Data Range Selection")
+    start_date = st.date_input("Start Date", value=pd.to_datetime('2018-01-01'))
+    end_date = st.date_input("End Date", value=pd.to_datetime('today'))
+    
+    st.markdown("""
+    **Confidence Levels:**
+    - 68%: 1 Standard Deviation
+    - 80%: 1.28 SD
+    - 90%: 1.645 SD
+    - 95%: 2 SD
+    """)
 
 # Utility functions
 def calculate_atr(data, period=14):
@@ -22,18 +37,15 @@ def calculate_sd(data, period=14):
     returns = data['Close'].pct_change()
     return returns.rolling(period).std()
 
-# Load data with automatic freshness
+# Load data with date selection
 @st.cache_data
-def load_data():
-    df = yf.download('^NSEI', period='5y', interval='1wk')
-    df['Last_Update'] = df.index[-1].strftime('%Y-%m-%d')
-    return df
+def load_data(start_date, end_date):
+    return yf.download('^NSEI', start=start_date, end=end_date, interval='1wk')
 
 # Main calculation function
-def calculate_limits():
-    data = load_data()
+def calculate_limits(start_date, end_date):
+    data = load_data(start_date, end_date)
     latest_close = data['Close'].iloc[-1]
-    validity_date = (pd.to_datetime(data.index[-1]) + pd.DateOffset(weeks=1)).strftime('%Y-%m-%d')
     
     # Calculate indicators
     data['ATR'] = calculate_atr(data)
@@ -43,7 +55,7 @@ def calculate_limits():
     current_atr = data['ATR'].iloc[-1]
     current_sd = data['SD'].iloc[-1]
     
-    return latest_close, current_atr, current_sd, validity_date, data['Last_Update'].iloc[-1]
+    return latest_close, current_atr, current_sd
 
 # Confidence levels configuration
 confidence_levels = {
@@ -54,11 +66,11 @@ confidence_levels = {
 }
 
 # Calculate and display results
-if st.button('Calculate Latest Projections'):
-    with st.spinner('Analyzing market volatility...'):
-        price, atr, sd, validity_date, last_data_date = calculate_limits()
+if st.button('Calculate Projected Limits'):
+    with st.spinner('Calculating...'):
+        price, atr, sd = calculate_limits(start_date, end_date)
         
-        # Create results dataframe with pre-formatted numbers
+        # Create results dataframe
         results = []
         for cl_name, cl in confidence_levels.items():
             atr_upper = price + (atr * cl)
@@ -68,51 +80,65 @@ if st.button('Calculate Latest Projections'):
             
             results.append({
                 'Confidence Level': cl_name,
-                'ATR Lower': f"{atr_lower:.2f}",
-                'ATR Upper': f"{atr_upper:.2f}",
-                'SD Lower': f"{sd_lower:.2f}",
-                'SD Upper': f"{sd_upper:.2f}"
+                'ATR Upper': round(atr_upper, 2),
+                'ATR Lower': round(atr_lower, 2),
+                'SD Upper': round(sd_upper, 2),
+                'SD Lower': round(sd_lower, 2)
             })
             
         df = pd.DataFrame(results)
         
-        # Display data freshness
-        st.subheader(f"Data Currentness")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"**Latest Data Date:** {last_data_date}")
-        with col2:
-            st.markdown(f"**Valid Until:** {validity_date}")
+        # Display results
+        st.subheader(f"Current Nifty Level: {price:.2f}")
+        st.subheader("Projected Limits for Next Week")
         
-        # Display results with simplified layout
-        st.subheader("Projected Weekly Limits")
-        st.dataframe(df)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### ATR-based Limits")
+            st.dataframe(df[['Confidence Level', 'ATR Upper', 'ATR Lower']]
+                        .style.format({'ATR Upper': '{:.2f}', 'ATR Lower': '{:.2f}'}))
+            
+        with col2:
+            st.markdown("### SD-based Limits")
+            st.dataframe(df[['Confidence Level', 'SD Upper', 'SD Lower']]
+                        .style.format({'SD Upper': '{:.2f}', 'SD Lower': '{:.2f}'}))
+        
+        # Visualization (Fixed plotting code)
+        st.subheader("Visual Comparison")
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        # Prepare data for plotting
+        categories = list(confidence_levels.keys())
+        atr_ranges = df['ATR Upper'] - df['ATR Lower']
+        sd_ranges = df['SD Upper'] - df['SD Lower']
 
-        # Display current price for reference
-        st.info(f"Current Nifty Price: {price:.2f}")
+        x = np.arange(len(categories))
+        width = 0.35
+        
+        ax.bar(x - width/2, atr_ranges, width, label='ATR Range', color='#1f77b4')
+        ax.bar(x + width/2, sd_ranges, width, label='SD Range', color='#ff7f0e')
+        
+        ax.set_xticks(x)
+        ax.set_xticklabels(categories)
+        ax.set_ylabel('Price Range')
+        ax.set_title('Volatility Range Comparison')
+        ax.legend()
+        
+        st.pyplot(fig)
+        
+        # Disclaimer
+        st.markdown("""
+        **Disclaimer:**  
+        These projections are based on historical volatility measures and should not be considered as financial advice. 
+        Actual market movements may vary significantly.
+        """)
 
-# Sidebar information
-with st.sidebar:
-    st.header("Methodology")
-    st.markdown("""
-    **Calculations based on:**
-    - 5 years of weekly Nifty 50 data
-    - 14-period ATR (Average True Range)
-    - 14-period Standard Deviation
-    - Multiple confidence levels
-    """)
-    
-    st.markdown("""
-    **Validity:**
-    - Projections valid until next weekly close
-    - Updated automatically with market data
-    """)
-
-# Instructions
+# How to Run
 st.markdown("""
 **How to Use:**
-1. Click 'Calculate Latest Projections'
-2. Check data currency above results
-3. Compare both volatility measures
-4. Use values for options strategy planning
+1. Select date range in sidebar
+2. Click the 'Calculate Projected Limits' button
+3. View results in tables and charts
+4. Compare ATR and SD-based projections
 """)
