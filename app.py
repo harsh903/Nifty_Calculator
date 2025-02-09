@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 
 # App configuration
 st.set_page_config(page_title="Nifty Options Calculator", layout="wide")
@@ -85,40 +84,23 @@ if st.button('Calculate Latest Projections'):
         with col2:
             st.markdown(f"**Valid Until:** {validity_date}")
         
-        # Display results
+        # Display results with simplified layout
         st.subheader("Projected Weekly Limits")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("### ATR-based Limits (Absolute)")
-            st.dataframe(df[['Confidence Level', 'ATR Upper', 'ATR Lower']])
-            
-        with col2:
-            st.markdown("### SD-based Limits (Percentage)")
-            st.dataframe(df[['Confidence Level', 'SD Upper', 'SD Lower']])
-        
-        # Visualization (Fixed)
-        st.subheader("Volatility Range Comparison")
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Prepare properly formatted 1D arrays
-        atr_ranges = df['ATR Upper'] - df['ATR Lower']
-        sd_ranges = df['SD Upper'] - df['SD Lower']
+        # Combined view of both metrics
+        st.dataframe(df[[
+            'Confidence Level',
+            'ATR Lower', 'ATR Upper',
+            'SD Lower', 'SD Upper'
+        ]].style.format({
+            'ATR Lower': '{:.2f}',
+            'ATR Upper': '{:.2f}',
+            'SD Lower': '{:.2f}',
+            'SD Upper': '{:.2f}'
+        }))
 
-        x = np.arange(len(confidence_levels))
-        width = 0.35
-        
-        # Plot with corrected array dimensions
-        ax.bar(x - width/2, atr_ranges, width, label='ATR Range', color='#1f77b4')
-        ax.bar(x + width/2, sd_ranges, width, label='SD Range', color='#ff7f0e')
-        
-        ax.set_xticks(x)
-        ax.set_xticklabels(confidence_levels.keys())
-        ax.set_ylabel('Price Range')
-        ax.set_title('Expected Weekly Price Movement Ranges')
-        ax.legend()
-        
-        st.pyplot(fig)
+        # Display current price for reference
+        st.info(f"Current Nifty Price: {price:.2f}")
 
 # Sidebar information
 with st.sidebar:
