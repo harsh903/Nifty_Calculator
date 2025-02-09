@@ -58,7 +58,7 @@ if st.button('Calculate Latest Projections'):
     with st.spinner('Analyzing market volatility...'):
         price, atr, sd, validity_date, last_data_date = calculate_limits()
         
-        # Create results dataframe
+        # Create results dataframe with pre-formatted numbers
         results = []
         for cl_name, cl in confidence_levels.items():
             atr_upper = price + (atr * cl)
@@ -68,10 +68,10 @@ if st.button('Calculate Latest Projections'):
             
             results.append({
                 'Confidence Level': cl_name,
-                'ATR Upper': round(atr_upper, 2),
-                'ATR Lower': round(atr_lower, 2),
-                'SD Upper': round(sd_upper, 2),
-                'SD Lower': round(sd_lower, 2)
+                'ATR Lower': f"{atr_lower:.2f}",
+                'ATR Upper': f"{atr_upper:.2f}",
+                'SD Lower': f"{sd_lower:.2f}",
+                'SD Upper': f"{sd_upper:.2f}"
             })
             
         df = pd.DataFrame(results)
@@ -86,18 +86,7 @@ if st.button('Calculate Latest Projections'):
         
         # Display results with simplified layout
         st.subheader("Projected Weekly Limits")
-        
-        # Combined view of both metrics
-        st.dataframe(df[[
-            'Confidence Level',
-            'ATR Lower', 'ATR Upper',
-            'SD Lower', 'SD Upper'
-        ]].style.format({
-            'ATR Lower': '{:.2f}',
-            'ATR Upper': '{:.2f}',
-            'SD Lower': '{:.2f}',
-            'SD Upper': '{:.2f}'
-        }))
+        st.dataframe(df)
 
         # Display current price for reference
         st.info(f"Current Nifty Price: {price:.2f}")
