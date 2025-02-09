@@ -97,22 +97,23 @@ if st.button('Calculate Latest Projections'):
             st.markdown("### SD-based Limits (Percentage)")
             st.dataframe(df[['Confidence Level', 'SD Upper', 'SD Lower']])
         
-        # Visualization
+        # Visualization (Fixed)
         st.subheader("Volatility Range Comparison")
         fig, ax = plt.subplots(figsize=(12, 6))
         
-        categories = list(confidence_levels.keys())
+        # Prepare properly formatted 1D arrays
         atr_ranges = df['ATR Upper'] - df['ATR Lower']
         sd_ranges = df['SD Upper'] - df['SD Lower']
 
-        x = np.arange(len(categories))
+        x = np.arange(len(confidence_levels))
         width = 0.35
         
+        # Plot with corrected array dimensions
         ax.bar(x - width/2, atr_ranges, width, label='ATR Range', color='#1f77b4')
         ax.bar(x + width/2, sd_ranges, width, label='SD Range', color='#ff7f0e')
         
         ax.set_xticks(x)
-        ax.set_xticklabels(categories)
+        ax.set_xticklabels(confidence_levels.keys())
         ax.set_ylabel('Price Range')
         ax.set_title('Expected Weekly Price Movement Ranges')
         ax.legend()
