@@ -59,25 +59,42 @@ def load_data(weeks_needed):
         if df.empty:
             st.error("Unable to fetch data. Please try again later.")
             return None
+        
+        # Handle MultiIndex structure
+        if isinstance(df.columns, pd.MultiIndex):
+            # Select first ticker's data ('^NSEI')
+            ticker = df.columns.get_level_values('Ticker')[0]
             
-        # Reset index and handle columns properly
-        df = df.reset_index()
-        
-        # Select only the required columns in the correct order
-        required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-        
-        # If we have all required columns, select them
-        if all(col in df.columns for col in required_columns):
-            df = df[required_columns]
+            # Create a new DataFrame with flattened columns
+            cleaned_df = pd.DataFrame()
+            cleaned_df['Date'] = df.index
+            cleaned_df['Open'] = df[('Open', ticker)]
+            cleaned_df['High'] = df[('High', ticker)]
+            cleaned_df['Low'] = df[('Low', ticker)]
+            cleaned_df['Close'] = df[('Close', ticker)]
+            cleaned_df['Volume'] = df[('Volume', ticker)]
+            
         else:
-            st.error("Missing required columns in data")
-            return None
-            
-        return df
-            
+            # If not MultiIndex, just reset index normally
+            cleaned_df = df.reset_index()
+        
+        # Ensure proper data types
+        cleaned_df['Date'] = pd.to_datetime(cleaned_df['Date'])
+        numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        for col in numeric_columns:
+            cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors='coerce')
+        
+        # Handle any missing values
+        if cleaned_df.isnull().any().any():
+            st.warning("Some data points were missing and have been interpolated.")
+            cleaned_df = cleaned_df.interpolate(method='linear')
+        
+        return cleaned_df
+        
     except Exception as e:
         st.error(f"Error in data loading: {str(e)}")
-        st.write("DataFrame columns:", df.columns.tolist() if 'df' in locals() else "No DataFrame available")
+        st.write("DataFrame columns structure:", 
+                 df.columns.to_list() if 'df' in locals() else "No DataFrame available")
         return None
 
 def calculate_weekly_metrics(daily_data):
