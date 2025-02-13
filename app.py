@@ -9,7 +9,7 @@ st.set_page_config(page_title="Nifty Technical Analysis", layout="wide")
 st.title("Nifty 50 Technical Analysis")
 
 # Create tabs
-tab1, tab2, tab3, tab4 = st.tabs(["Weekly Volatility", "Technical Levels", "Weekly Levels", "Formula Explanations"])
+tab1, tab2, tab3, tab4 = st.tabs(["Weekly Range Analysis", "Technical Levels", "Weekly Levels", "Formula Explanations"])
 
 # Period selection (Global)
 period = st.sidebar.number_input("Enter number of weeks:", min_value=1, value=14, step=1)
@@ -27,28 +27,26 @@ def get_previous_thursday(date):
         days_behind += 7
     return date - timedelta(days=days_behind)
 
-valid_until = get_next_thursday(datetime.now().date())
-
-# Confidence levels configuration
-confidence_levels = {
-    '68% (1σ)': 1,
-    '80% (1.28σ)': 1.28,
-    '90% (1.645σ)': 1.645,
-    '95% (2σ)': 2
-}
-
-# Display current date information
+# Date handling for Thursday to Thursday
 current_date = datetime.now().date()
 current_thursday = get_next_thursday(current_date)
 last_thursday = get_previous_thursday(current_date)
 
 st.sidebar.markdown(f"""
 ### Date Information
-**Current Date:** {current_date}
-**Current Week:**
-- Start: {last_thursday}
-- End: {current_thursday}
+**Analysis Period:**
+- From: {last_thursday}
+- To: {current_thursday}
 """)
+
+# Complete set of confidence levels
+confidence_levels = {
+    '68% (1σ)': 1,
+    '80% (1.28σ)': 1.28,
+    '90% (1.645σ)': 1.645,
+    '95% (2σ)': 2,
+    '99% (2.576σ)': 2.576
+}
 
 @st.cache_data
 def load_data(weeks_needed):
@@ -62,13 +60,9 @@ def load_data(weeks_needed):
             
         # Handle MultiIndex structure
         if isinstance(df.columns, pd.MultiIndex):
-            # Select first ticker's data ('^NSEI')
             ticker = df.columns.get_level_values('Ticker')[0]
-            
-            # Create a new DataFrame with flattened columns
             cleaned_df = pd.DataFrame(index=df.index)
             
-            # Map the columns and handle missing data
             for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
                 try:
                     cleaned_df[col] = df[(col, ticker)].replace(0, np.nan)
@@ -76,7 +70,6 @@ def load_data(weeks_needed):
                     st.warning(f"Column {col} not found in data")
                     cleaned_df[col] = np.nan
             
-            # Add Date column
             cleaned_df = cleaned_df.reset_index()
             cleaned_df.rename(columns={'index': 'Date'}, inplace=True)
             
@@ -84,19 +77,10 @@ def load_data(weeks_needed):
             cleaned_df = df.reset_index()
             cleaned_df = cleaned_df.replace(0, np.nan)
         
-        # Convert date to datetime
         cleaned_df['Date'] = pd.to_datetime(cleaned_df['Date'])
-        
-        # Forward fill missing values first
-        cleaned_df = cleaned_df.ffill()
-        
-        # Backward fill any remaining missing values
-        cleaned_df = cleaned_df.bfill()
-        
-        # Handle any remaining NaN values
+        cleaned_df = cleaned_df.ffill().bfill()
         cleaned_df = cleaned_df.interpolate(method='linear', limit_direction='both')
         
-        # Handle volume separately
         if 'Volume' in cleaned_df.columns:
             cleaned_df['Volume'] = cleaned_df['Volume'].fillna(0)
         
@@ -110,17 +94,14 @@ def calculate_weekly_metrics(daily_data):
     try:
         daily_data = daily_data.copy()
         
-        # Verify we have all required data
         required_columns = ['Date', 'Open', 'High', 'Low', 'Close']
         missing_columns = [col for col in required_columns if col not in daily_data.columns]
         if missing_columns:
             st.error(f"Missing required columns: {missing_columns}")
             return None
             
-        # Calculate Thursday for grouping
         daily_data['Thursday'] = daily_data['Date'].apply(get_next_thursday)
         
-        # Group by Thursday and aggregate
         weekly_data = daily_data.groupby('Thursday').agg({
             'High': 'max',
             'Low': 'min',
@@ -136,7 +117,6 @@ def calculate_weekly_metrics(daily_data):
         return None
 
 def calculate_daily_ma(data, ma_type='EMA', periods=[20, 50, 100, 200]):
-    """Calculate Moving Averages on daily data"""
     try:
         ma_dict = {}
         for period in periods:
@@ -144,7 +124,7 @@ def calculate_daily_ma(data, ma_type='EMA', periods=[20, 50, 100, 200]):
                 ma_dict[f'EMA_{period}d'] = data['Close'].ewm(span=period, adjust=False).mean()
             else:  # SMA
                 ma_dict[f'SMA_{period}d'] = data['Close'].rolling(window=period).mean()
-        return pd.DataFrame(ma_dict).iloc[-1]  # Return only the latest values
+        return pd.DataFrame(ma_dict).iloc[-1]
     except Exception as e:
         st.error(f"Error in {ma_type} calculation: {str(e)}")
         return None
@@ -197,7 +177,6 @@ def calculate_weekly_fibonacci(data):
         return None
 
 def calculate_pivot_points(data):
-    """Calculate Pivot Points"""
     try:
         high = data['High'].iloc[-1]
         low = data['Low'].iloc[-1]
@@ -246,7 +225,7 @@ if vix_value:
         options=list(confidence_levels.keys()),
         key='vix_conf'
     )
-    vix_price = st.sidebar.number_input("Enter current Nifty price:", 
+    vix_price = st.sidebar.number_input("Enter closing Nifty price:", 
                                        min_value=0.0,
                                        value=None,
                                        placeholder="Enter price...")
@@ -254,7 +233,7 @@ if vix_value:
     if vix_price:
         try:
             k = confidence_levels[vix_confidence]
-            vix_weekly = vix_value / np.sqrt(52)  # Annual to Weekly
+            vix_weekly = vix_value / np.sqrt(52)
             vix_upper = vix_price * (1 + (k * vix_weekly/100))
             vix_lower = vix_price * (1 - (k * vix_weekly/100))
             
@@ -275,23 +254,20 @@ daily_data = load_data(weeks_needed)
 if daily_data is not None:
     weekly_data = calculate_weekly_metrics(daily_data)
     if weekly_data is not None:
-        current_price = weekly_data['Close'].iloc[-1]
         latest_date = weekly_data.index[-1]
-        valid_until = latest_date + pd.Timedelta(days=7)
 
         # Display data validity
         st.markdown(f"""
         ### Analysis Information
-        - **Latest Data Date:** {latest_date.strftime('%Y-%m-%d')}
-        - **Valid Until:** {valid_until.strftime('%Y-%m-%d')}
+        - **Analysis Start:** {last_thursday.strftime('%Y-%m-%d')}
+        - **Analysis End:** {current_thursday.strftime('%Y-%m-%d')}
         - **Trading Days Used:** {period} weeks
         """)
 
-        # Tab 1: Weekly Volatility Analysis
+        # Tab 1: Weekly Range Analysis
         with tab1:
-            st.header("Weekly Volatility Analysis")
+            st.header("Weekly Range Analysis")
             
-            # Weekly ATR and SD calculations
             atr_series = calculate_atr(weekly_data, period)
             sd_series = calculate_sd(weekly_data, period)
             
@@ -299,56 +275,88 @@ if daily_data is not None:
                 current_atr = atr_series.iloc[-1]
                 current_sd = sd_series.iloc[-1]
                 
-                # Display current metrics
-                metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
-                with metrics_col1:
-                    st.metric("Current Price", f"₹{current_price:.2f}")
-                with metrics_col2:
-                    st.metric(f"{period}-Week ATR", f"₹{current_atr:.2f}")
-                with metrics_col3:
-                    st.metric(f"{period}-Week SD", f"{current_sd*100:.2f}%")
+                latest_close = weekly_data['Close'].iloc[-1]
+                
+                # Calculate 90% confidence metrics for dashboard
+                k_90 = 1.645  # 90% confidence factor
+                atr_90_move = current_atr * k_90
+                sd_90_move_pct = k_90 * current_sd * 100
+                
+                # VIX calculation for dashboard if VIX value is provided
+                vix_90_range = None
+                if 'vix_value' in locals() and vix_value and 'vix_price' in locals() and vix_price:
+                    vix_weekly = vix_value / np.sqrt(52)
+                    vix_90_range = vix_price * (k_90 * vix_weekly/100)
 
-                # ATR ranges
+                # Display metrics with 90% confidence
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(f"{period}-Week ATR (90%)", f"₹{atr_90_move:.2f}")
+                with col2:
+                    st.metric(f"{period}-Week SD (90%)", f"±{sd_90_move_pct:.2f}%")
+                with col3:
+                    if vix_90_range:
+                        st.metric("VIX Range (90%)", f"₹{vix_90_range:.2f}")
+                    else:
+                        st.metric("VIX Range (90%)", "Not Available")
+
+                # ATR ranges - show all confidence levels
                 st.subheader("ATR-Based Weekly Ranges")
                 atr_results = []
                 for cl_name, cl in confidence_levels.items():
-                    atr_upper = round(current_price + (current_atr * cl), 2)
-                    atr_lower = round(current_price - (current_atr * cl), 2)
                     atr_move = current_atr * cl
-                    atr_move_pct = (current_atr * cl / current_price) * 100
+                    upper_limit = latest_close + atr_move
+                    lower_limit = latest_close - atr_move
                     
                     atr_results.append({
                         'Confidence': cl_name,
-                        'Factor': cl,
                         'Move (₹)': round(atr_move, 2),
-                        'Move (%)': f"{round(atr_move_pct, 2)}%",
-                        'Lower Limit': atr_lower,
-                        'Current': current_price,
-                        'Upper Limit': atr_upper,
+                        'Upper Limit': round(upper_limit, 2),
+                        'Lower Limit': round(lower_limit, 2),
+                        'Range (₹)': round(upper_limit - lower_limit, 2)
                     })
                 
                 st.dataframe(pd.DataFrame(atr_results))
                 
-                # SD ranges
+                # SD ranges - show all confidence levels
                 st.subheader("SD-Based Weekly Ranges")
                 sd_results = []
                 for cl_name, cl in confidence_levels.items():
                     sd_move_pct = cl * current_sd * 100
-                    sd_move = current_price * (current_sd * cl)
-                    sd_upper = round(current_price * (1 + (current_sd * cl)), 2)
-                    sd_lower = round(current_price * (1 - (current_sd * cl)), 2)
+                    sd_move = latest_close * (current_sd * cl)
+                    upper_limit = latest_close * (1 + (current_sd * cl))
+                    lower_limit = latest_close * (1 - (current_sd * cl))
                     
                     sd_results.append({
                         'Confidence': cl_name,
-                        'Factor': cl,
                         'Move (%)': f"{round(sd_move_pct, 2)}%",
-                        'Move (₹)': round(sd_move, 2),
-                        'Lower Limit': sd_lower,
-                        'Current': current_price,
-                        'Upper Limit': sd_upper,
+                        'Upper Limit': round(upper_limit, 2),
+                        'Lower Limit': round(lower_limit, 2),
+                        'Range (₹)': round(upper_limit - lower_limit, 2)
                     })
                 
                 st.dataframe(pd.DataFrame(sd_results))
+
+                # VIX ranges - show all confidence levels if VIX is provided
+                if vix_value and vix_price:
+                    st.subheader("VIX-Based Weekly Ranges")
+                    vix_results = []
+                    vix_weekly = vix_value / np.sqrt(52)
+                    
+                    for cl_name, cl in confidence_levels.items():
+                        vix_range = vix_price * (cl * vix_weekly/100)
+                        upper_limit = vix_price * (1 + (cl * vix_weekly/100))
+                        lower_limit = vix_price * (1 - (cl * vix_weekly/100))
+                        
+                        vix_results.append({
+                            'Confidence': cl_name,
+                            'Move (₹)': round(vix_range, 2),
+                            'Upper Limit': round(upper_limit, 2),
+                            'Lower Limit': round(lower_limit, 2),
+                            'Range (₹)': round(upper_limit - lower_limit, 2)
+                        })
+                    
+                    st.dataframe(pd.DataFrame(vix_results))
 
         # Tab 2: Technical Levels
         with tab2:
@@ -364,13 +372,14 @@ if daily_data is not None:
                 st.subheader("Daily EMA Levels")
                 if ema_values is not None:
                     ema_data = []
+                    latest_close = weekly_data['Close'].iloc[-1]
                     for name, value in ema_values.items():
-                        level_type = "Support" if value < current_price else "Resistance"
+                        level_type = "Support" if value < latest_close else "Resistance"
                         ema_data.append({
                             'MA Type': name,
                             'Value': round(value, 2),
                             'Type': level_type,
-                            'Distance': f"{abs(round((value/current_price - 1) * 100, 2))}%"
+                            'Distance': f"{abs(round((value/latest_close - 1) * 100, 2))}%"
                         })
                     st.dataframe(pd.DataFrame(ema_data))
             
@@ -379,12 +388,12 @@ if daily_data is not None:
                 if sma_values is not None:
                     sma_data = []
                     for name, value in sma_values.items():
-                        level_type = "Support" if value < current_price else "Resistance"
+                        level_type = "Support" if value < latest_close else "Resistance"
                         sma_data.append({
                             'MA Type': name,
                             'Value': round(value, 2),
                             'Type': level_type,
-                            'Distance': f"{abs(round((value/current_price - 1) * 100, 2))}%"
+                            'Distance': f"{abs(round((value/latest_close - 1) * 100, 2))}%"
                         })
                     st.dataframe(pd.DataFrame(sma_data))
 
@@ -394,12 +403,12 @@ if daily_data is not None:
                 st.subheader("Weekly Pivot Points")
                 pivot_data = []
                 for level, value in pivot_levels.items():
-                    level_type = "Support" if value < current_price else "Resistance"
+                    level_type = "Support" if value < latest_close else "Resistance"
                     pivot_data.append({
                         'Level': level,
                         'Value': round(value, 2),
                         'Type': level_type,
-                        'Distance': f"{abs(round((value/current_price - 1) * 100, 2))}%"
+                        'Distance': f"{abs(round((value/latest_close - 1) * 100, 2))}%"
                     })
                 st.dataframe(pd.DataFrame(pivot_data))
 
@@ -412,26 +421,26 @@ if daily_data is not None:
             if fib_levels is not None:
                 st.subheader("Weekly Fibonacci Levels")
                 fib_data = []
+                latest_close = weekly_data['Close'].iloc[-1]
                 for level, value in fib_levels.items():
-                    level_type = "Support" if value < current_price else "Resistance"
+                    level_type = "Support" if value < latest_close else "Resistance"
                     fib_data.append({
                         'Level': level,
                         'Value': round(value, 2),
                         'Type': level_type,
-                        'Distance': f"{abs(round((value/current_price - 1) * 100, 2))}%"
+                        'Distance': f"{abs(round((value/latest_close - 1) * 100, 2))}%"
                     })
                 st.dataframe(pd.DataFrame(fib_data))
 
-            # Summary
+            # Price Levels Summary
             st.subheader("Price Levels Summary")
-            st.markdown(f"**Current Price: ₹{current_price:.2f}**")
 
             # Resistance Levels
             st.markdown("**Resistance Levels:**")
             
             # EMA Resistance
             if ema_values is not None:
-                ema_resistances = [v for v in ema_values if v > current_price]
+                ema_resistances = [v for v in ema_values if v > latest_close]
                 if ema_resistances:
                     st.markdown(f"- Daily EMA: ₹{min(ema_resistances):.2f}")
                 else:
@@ -439,7 +448,7 @@ if daily_data is not None:
 
             # Pivot Resistance
             if pivot_levels:
-                pivot_resistances = [v for v in pivot_levels.values() if v > current_price]
+                pivot_resistances = [v for v in pivot_levels.values() if v > latest_close]
                 if pivot_resistances:
                     st.markdown(f"- Pivot: ₹{min(pivot_resistances):.2f}")
                 else:
@@ -447,7 +456,7 @@ if daily_data is not None:
 
             # Fibonacci Resistance
             if fib_levels:
-                fib_resistances = [v for v in fib_levels.values() if v > current_price]
+                fib_resistances = [v for v in fib_levels.values() if v > latest_close]
                 if fib_resistances:
                     st.markdown(f"- Fibonacci: ₹{min(fib_resistances):.2f}")
                 else:
@@ -458,7 +467,7 @@ if daily_data is not None:
             
             # EMA Support
             if ema_values is not None:
-                ema_supports = [v for v in ema_values if v < current_price]
+                ema_supports = [v for v in ema_values if v < latest_close]
                 if ema_supports:
                     st.markdown(f"- Daily EMA: ₹{max(ema_supports):.2f}")
                 else:
@@ -466,7 +475,7 @@ if daily_data is not None:
 
             # Pivot Support
             if pivot_levels:
-                pivot_supports = [v for v in pivot_levels.values() if v < current_price]
+                pivot_supports = [v for v in pivot_levels.values() if v < latest_close]
                 if pivot_supports:
                     st.markdown(f"- Pivot: ₹{max(pivot_supports):.2f}")
                 else:
@@ -474,7 +483,7 @@ if daily_data is not None:
 
             # Fibonacci Support
             if fib_levels:
-                fib_supports = [v for v in fib_levels.values() if v < current_price]
+                fib_supports = [v for v in fib_levels.values() if v < latest_close]
                 if fib_supports:
                     st.markdown(f"- Fibonacci: ₹{max(fib_supports):.2f}")
                 else:
@@ -485,8 +494,8 @@ if daily_data is not None:
             if pivot_resistances and pivot_supports:
                 nearest_resistance = min(pivot_resistances)
                 nearest_support = max(pivot_supports)
-                resistance_distance = abs(round((nearest_resistance/current_price - 1) * 100, 2))
-                support_distance = abs(round((nearest_support/current_price - 1) * 100, 2))
+                resistance_distance = abs(round((nearest_resistance/latest_close - 1) * 100, 2))
+                support_distance = abs(round((nearest_support/latest_close - 1) * 100, 2))
                 
                 st.markdown(f"- Price to Nearest Resistance: {resistance_distance}%")
                 st.markdown(f"- Price to Nearest Support: {support_distance}%")
@@ -512,8 +521,8 @@ if daily_data is not None:
             - Using {period} weeks of historical data
             - Weekly data from Thursday to Thursday
             - Daily moving averages for better precision
-            - Current analysis date: {latest_date.strftime('%Y-%m-%d')}
-            - Valid until: {valid_until.strftime('%Y-%m-%d')}
+            - Current analysis date: {last_thursday.strftime('%Y-%m-%d')}
+            - Valid until: {current_thursday.strftime('%Y-%m-%d')}
             
             ### Moving Averages (Daily)
             ```python
@@ -525,7 +534,7 @@ if daily_data is not None:
             SMA = Sum of prices for period / period
             ```
             
-            ### Weekly Volatility
+            ### Weekly Range Analysis
             ```python
             # ATR (Average True Range)
             TR = max(
@@ -609,6 +618,6 @@ st.markdown(f"""
 <div style='text-align: center; color: #666;'>
 Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 <br>
-Next update: {valid_until.strftime('%Y-%m-%d')}
+Next update: {current_thursday.strftime('%Y-%m-%d')}
 </div>
 """, unsafe_allow_html=True)
