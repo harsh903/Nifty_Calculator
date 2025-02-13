@@ -53,25 +53,53 @@ st.sidebar.markdown(f"""
 @st.cache_data
 def load_data(weeks_needed):
     try:
-        days_needed = str(int(weeks_needed * 7 + 10)) + 'd'
-        df = yf.download('^NSEI', period=days_needed, interval='1d')
-        if df.empty:
-            st.error("Unable to fetch data. Please try again later.")
-            return None
+        # Try reading local CSV first
+        try:
+            df = pd.read_csv('Nifty50_data.csv')
+            # Convert column names to match expected format
+            column_mapping = {
+                'Price': 'Date',  # Assuming 'Price' column is actually the date
+                'Close': 'Close',
+                'High': 'High',
+                'Low': 'Low',
+                'Open': 'Open',
+                'Volume': 'Volume'
+            }
+            df = df.rename(columns=column_mapping)
             
-        # Handle multi-index DataFrame
-        if isinstance(df.index, pd.MultiIndex):
-            # Reset the multi-index to columns
-            df = df.reset_index(level=[0, 1])
-        else:
-            df = df.reset_index()
+            # Add Adj Close column as same as Close for consistency
+            df['Adj Close'] = df['Close']
             
-        # Rename columns if needed
-        df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
-        return df
-        
+            # Ensure proper date format
+            df['Date'] = pd.to_datetime(df['Date'])
+            
+            # Sort by date
+            df = df.sort_values('Date')
+            
+            return df
+            
+        except FileNotFoundError:
+            # If CSV not found, fetch from yfinance
+            days_needed = str(int(weeks_needed * 7 + 10)) + 'd'
+            df = yf.download('^NSEI', period=days_needed, interval='1d')
+            
+            if df.empty:
+                st.error("Unable to fetch data. Please try again later.")
+                return None
+                
+            # Handle multi-index DataFrame from yfinance
+            if isinstance(df.index, pd.MultiIndex):
+                df = df.reset_index(level=[0, 1])
+            else:
+                df = df.reset_index()
+                
+            # Rename columns to ensure consistency
+            df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
+            
+            return df
+            
     except Exception as e:
-        st.error(f"Error fetching data: {str(e)}")
+        st.error(f"Error in data loading: {str(e)}")
         return None
 
 def calculate_weekly_metrics(daily_data):
