@@ -53,66 +53,50 @@ st.sidebar.markdown(f"""
 @st.cache_data
 def load_data(weeks_needed):
     try:
-        # Try reading local CSV first
-        try:
-            df = pd.read_csv('Nifty50_data.csv')
-            # Convert column names to match expected format
-            column_mapping = {
-                'Price': 'Date',  # Assuming 'Price' column is actually the date
-                'Close': 'Close',
-                'High': 'High',
-                'Low': 'Low',
-                'Open': 'Open',
-                'Volume': 'Volume'
-            }
-            df = df.rename(columns=column_mapping)
+        days_needed = str(int(weeks_needed * 7 + 10)) + 'd'
+        df = yf.download('^NSEI', period=days_needed, interval='1d')
+        
+        if df.empty:
+            st.error("Unable to fetch data. Please try again later.")
+            return None
             
-            # Add Adj Close column as same as Close for consistency
-            df['Adj Close'] = df['Close']
+        # Reset index and handle columns properly
+        df = df.reset_index()
+        
+        # Select only the required columns in the correct order
+        required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+        
+        # If we have all required columns, select them
+        if all(col in df.columns for col in required_columns):
+            df = df[required_columns]
+        else:
+            st.error("Missing required columns in data")
+            return None
             
-            # Ensure proper date format
-            df['Date'] = pd.to_datetime(df['Date'])
-            
-            # Sort by date
-            df = df.sort_values('Date')
-            
-            return df
-            
-        except FileNotFoundError:
-            # If CSV not found, fetch from yfinance
-            days_needed = str(int(weeks_needed * 7 + 10)) + 'd'
-            df = yf.download('^NSEI', period=days_needed, interval='1d')
-            
-            if df.empty:
-                st.error("Unable to fetch data. Please try again later.")
-                return None
-                
-            # Handle multi-index DataFrame from yfinance
-            if isinstance(df.index, pd.MultiIndex):
-                df = df.reset_index(level=[0, 1])
-            else:
-                df = df.reset_index()
-                
-            # Rename columns to ensure consistency
-            df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
-            
-            return df
+        return df
             
     except Exception as e:
         st.error(f"Error in data loading: {str(e)}")
+        st.write("DataFrame columns:", df.columns.tolist() if 'df' in locals() else "No DataFrame available")
         return None
 
 def calculate_weekly_metrics(daily_data):
     try:
         daily_data = daily_data.copy()
-        if isinstance(daily_data.index, pd.DatetimeIndex):
-            daily_data = daily_data.reset_index()
         
-        if not isinstance(daily_data['Date'].iloc[0], pd.Timestamp):
+        # Ensure we have a Date column
+        if 'Date' not in daily_data.columns:
+            st.error("No Date column found in data")
+            return None
+            
+        # Convert Date to datetime if it isn't already
+        if not pd.api.types.is_datetime64_any_dtype(daily_data['Date']):
             daily_data['Date'] = pd.to_datetime(daily_data['Date'])
         
+        # Calculate Thursday for grouping
         daily_data['Thursday'] = daily_data['Date'].apply(get_next_thursday)
         
+        # Group by Thursday and aggregate
         weekly_data = daily_data.groupby('Thursday').agg({
             'High': 'max',
             'Low': 'min',
@@ -122,8 +106,10 @@ def calculate_weekly_metrics(daily_data):
         
         weekly_data = weekly_data.set_index('Thursday')
         return weekly_data
+        
     except Exception as e:
         st.error(f"Error in weekly calculation: {str(e)}")
+        st.write("DataFrame columns:", daily_data.columns.tolist() if 'daily_data' in locals() else "No DataFrame available")
         return None
 
 def calculate_atr(data, period):
