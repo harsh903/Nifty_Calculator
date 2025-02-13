@@ -66,49 +66,89 @@ def load_data(weeks_needed):
             ticker = df.columns.get_level_values('Ticker')[0]
             
             # Create a new DataFrame with flattened columns
-            cleaned_df = pd.DataFrame()
-            cleaned_df['Date'] = df.index
-            cleaned_df['Open'] = df[('Open', ticker)]
-            cleaned_df['High'] = df[('High', ticker)]
-            cleaned_df['Low'] = df[('Low', ticker)]
-            cleaned_df['Close'] = df[('Close', ticker)]
-            cleaned_df['Volume'] = df[('Volume', ticker)]
+            cleaned_df = pd.DataFrame(index=df.index)
+            
+            # Map the columns and handle missing data
+            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                try:
+                    cleaned_df[col] = df[(col, ticker)].replace(0, np.nan)
+                except KeyError:
+                    st.warning(f"Column {col} not found in data")
+                    cleaned_df[col] = np.nan
+            
+            # Add Date column
+            cleaned_df = cleaned_df.reset_index()
+            cleaned_df.rename(columns={'index': 'Date'}, inplace=True)
             
         else:
-            # If not MultiIndex, just reset index normally
             cleaned_df = df.reset_index()
+            cleaned_df = cleaned_df.replace(0, np.nan)
         
-        # Ensure proper data types
+        # Convert date to datetime
         cleaned_df['Date'] = pd.to_datetime(cleaned_df['Date'])
-        numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        for col in numeric_columns:
-            cleaned_df[col] = pd.to_numeric(cleaned_df[col], errors='coerce')
         
-        # Handle any missing values
+        # Forward fill missing values first (carries last valid observation forward)
+        cleaned_df = cleaned_df.ffill()
+        
+        # Backward fill any remaining missing values
+        cleaned_df = cleaned_df.bfill()
+        
+        # For any remaining NaN values after ffill and bfill (if at the start of the data)
+        # interpolate them
+        cleaned_df = cleaned_df.interpolate(method='linear', limit_direction='both')
+        
+        # Handle volume separately - replace NaN with 0 after other operations
+        if 'Volume' in cleaned_df.columns:
+            cleaned_df['Volume'] = cleaned_df['Volume'].fillna(0)
+        
+        # Verify no NaN values remain
         if cleaned_df.isnull().any().any():
-            st.warning("Some data points were missing and have been interpolated.")
-            cleaned_df = cleaned_df.interpolate(method='linear')
+            st.warning("Some NaN values could not be handled. Please check the data.")
+            # Print columns with NaN values
+            nan_columns = cleaned_df.columns[cleaned_df.isnull().any()].tolist()
+            st.write("Columns with NaN values:", nan_columns)
+        
+        # Add debugging information
+        st.write("Data shape:", cleaned_df.shape)
+        st.write("Date range:", 
+                cleaned_df['Date'].min().strftime('%Y-%m-%d'),
+                "to",
+                cleaned_df['Date'].max().strftime('%Y-%m-%d'))
         
         return cleaned_df
         
     except Exception as e:
         st.error(f"Error in data loading: {str(e)}")
-        st.write("DataFrame columns structure:", 
-                 df.columns.to_list() if 'df' in locals() else "No DataFrame available")
+        st.write("Error occurred. Debug info:")
+        if 'df' in locals():
+            st.write("Original DataFrame shape:", df.shape)
+            st.write("Original columns:", df.columns.tolist())
         return None
 
 def calculate_weekly_metrics(daily_data):
     try:
+        # Make a copy to avoid modifying the original
         daily_data = daily_data.copy()
         
-        # Ensure we have a Date column
-        if 'Date' not in daily_data.columns:
-            st.error("No Date column found in data")
+        # Verify we have all required data
+        required_columns = ['Date', 'Open', 'High', 'Low', 'Close']
+        missing_columns = [col for col in required_columns if col not in daily_data.columns]
+        if missing_columns:
+            st.error(f"Missing required columns: {missing_columns}")
             return None
             
-        # Convert Date to datetime if it isn't already
-        if not pd.api.types.is_datetime64_any_dtype(daily_data['Date']):
-            daily_data['Date'] = pd.to_datetime(daily_data['Date'])
+        # Ensure data types are correct
+        daily_data['Date'] = pd.to_datetime(daily_data['Date'])
+        numeric_columns = ['Open', 'High', 'Low', 'Close']
+        for col in numeric_columns:
+            daily_data[col] = pd.to_numeric(daily_data[col], errors='coerce')
+        
+        # Remove any remaining NaN values before aggregation
+        daily_data = daily_data.dropna(subset=numeric_columns)
+        
+        if daily_data.empty:
+            st.error("No valid data remains after cleaning")
+            return None
         
         # Calculate Thursday for grouping
         daily_data['Thursday'] = daily_data['Date'].apply(get_next_thursday)
@@ -122,11 +162,22 @@ def calculate_weekly_metrics(daily_data):
         }).reset_index()
         
         weekly_data = weekly_data.set_index('Thursday')
+        
+        # Verify the weekly data
+        st.write("Weekly data shape:", weekly_data.shape)
+        st.write("Weekly date range:", 
+                weekly_data.index.min().strftime('%Y-%m-%d'),
+                "to",
+                weekly_data.index.max().strftime('%Y-%m-%d'))
+        
         return weekly_data
         
     except Exception as e:
         st.error(f"Error in weekly calculation: {str(e)}")
-        st.write("DataFrame columns:", daily_data.columns.tolist() if 'daily_data' in locals() else "No DataFrame available")
+        if 'daily_data' in locals():
+            st.write("Debug info:")
+            st.write("Daily data shape:", daily_data.shape)
+            st.write("Columns:", daily_data.columns.tolist())
         return None
 
 def calculate_atr(data, period):
