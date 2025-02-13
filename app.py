@@ -14,14 +14,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["Weekly Volatility", "Weekly Support & Resista
 # Period selection (Global)
 period = st.sidebar.number_input("Enter number of weeks:", min_value=1, value=14, step=1)
 
-# Confidence levels configuration
-confidence_levels = {
-    '68% (1σ)': 1,
-    '80% (1.28σ)': 1.28,
-    '90% (1.645σ)': 1.645,
-    '95% (2σ)': 2
-}
-
+# Initialize valid_until at the top level
 def get_next_thursday(date):
     days_ahead = 3 - date.weekday()  # Thursday is 3
     if days_ahead <= 0:
@@ -33,6 +26,16 @@ def get_previous_thursday(date):
     if days_behind < 0:
         days_behind += 7
     return date - timedelta(days=days_behind)
+
+valid_until = get_next_thursday(datetime.now().date())
+
+# Confidence levels configuration
+confidence_levels = {
+    '68% (1σ)': 1,
+    '80% (1.28σ)': 1.28,
+    '90% (1.645σ)': 1.645,
+    '95% (2σ)': 2
+}
 
 # Display current date information
 current_date = datetime.now().date()
@@ -46,6 +49,30 @@ st.sidebar.markdown(f"""
 - Start: {last_thursday}
 - End: {current_thursday}
 """)
+
+@st.cache_data
+def load_data(weeks_needed):
+    try:
+        days_needed = str(int(weeks_needed * 7 + 10)) + 'd'
+        df = yf.download('^NSEI', period=days_needed, interval='1d')
+        if df.empty:
+            st.error("Unable to fetch data. Please try again later.")
+            return None
+            
+        # Handle multi-index DataFrame
+        if isinstance(df.index, pd.MultiIndex):
+            # Reset the multi-index to columns
+            df = df.reset_index(level=[0, 1])
+        else:
+            df = df.reset_index()
+            
+        # Rename columns if needed
+        df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
+        return df
+        
+    except Exception as e:
+        st.error(f"Error fetching data: {str(e)}")
+        return None
 
 def calculate_weekly_metrics(daily_data):
     try:
@@ -163,21 +190,6 @@ def calculate_weekly_pivot(data):
         }
     except Exception as e:
         st.error(f"Error in Pivot calculation: {str(e)}")
-        return None
-
-@st.cache_data
-def load_data(weeks_needed):
-    try:
-        days_needed = str(int(weeks_needed * 7 + 10)) + 'd'
-        df = yf.download('^NSEI', period=days_needed, interval='1d')
-        if df.empty:
-            st.error("Unable to fetch data. Please try again later.")
-            return None
-        df = df.reset_index()
-        df.columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
-        return df
-    except Exception as e:
-        st.error(f"Error fetching data: {str(e)}")
         return None
 
 # VIX Calculator in sidebar
@@ -346,9 +358,7 @@ if daily_data is not None:
 
         # Tab 2: Weekly Support & Resistance
         with tab2:
-            st.header("Weekly Support and Resistance")
-            
-            # Calculate weekly moving averages
+            st.header("Weekly Support and Resistance Analysis")
             ema_df = calculate_weekly_ema(weekly_data)
             sma_df = calculate_weekly_sma(weekly_data)
             
