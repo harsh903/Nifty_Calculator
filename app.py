@@ -280,7 +280,8 @@ if daily_data is not None:
                 # Calculate 90% confidence metrics for dashboard
                 k_90 = 1.645  # 90% confidence factor
                 atr_90_move = current_atr * k_90
-                sd_90_move_pct = k_90 * current_sd * 100
+                # Calculate both percentage and absolute value for SD
+                sd_90_move = latest_close * current_sd * k_90
                 
                 # VIX calculation for dashboard if VIX value is provided
                 vix_90_range = None
@@ -293,7 +294,7 @@ if daily_data is not None:
                 with col1:
                     st.metric(f"{period}-Week ATR (90%)", f"₹{atr_90_move:.2f}")
                 with col2:
-                    st.metric(f"{period}-Week SD (90%)", f"±{sd_90_move_pct:.2f}%")
+                    st.metric(f"{period}-Week SD (90%)", f"₹{sd_90_move:.2f}")
                 with col3:
                     if vix_90_range:
                         st.metric("VIX Range (90%)", f"₹{vix_90_range:.2f}")
@@ -322,14 +323,16 @@ if daily_data is not None:
                 st.subheader("SD-Based Weekly Ranges")
                 sd_results = []
                 for cl_name, cl in confidence_levels.items():
+                    # Calculate both percentage and absolute moves
                     sd_move_pct = cl * current_sd * 100
-                    sd_move = latest_close * (current_sd * cl)
+                    sd_move = latest_close * current_sd * cl
                     upper_limit = latest_close * (1 + (current_sd * cl))
                     lower_limit = latest_close * (1 - (current_sd * cl))
                     
                     sd_results.append({
                         'Confidence': cl_name,
                         'Move (%)': f"{round(sd_move_pct, 2)}%",
+                        'Move (₹)': round(sd_move, 2),
                         'Upper Limit': round(upper_limit, 2),
                         'Lower Limit': round(lower_limit, 2),
                         'Range (₹)': round(upper_limit - lower_limit, 2)
